@@ -9,16 +9,10 @@ const pool = new Pool({
 
 async function initDatabase() {
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS visits (
-      id INTEGER PRIMARY KEY,
-      count INTEGER NOT NULL
+    CREATE TABLE IF NOT EXISTS names (
+      id SERIAL PRIMARY KEY,
+      name TEXT NOT NULL
     )
-  `);
-
-  await pool.query(`
-    INSERT INTO visits (id, count)
-    VALUES (1, 0)
-    ON CONFLICT (id) DO NOTHING
   `);
 
   console.log("Database ready");
@@ -26,24 +20,84 @@ async function initDatabase() {
 
 const server = http.createServer(async (req, res) => {
   try {
-    const result = await pool.query(`
-      UPDATE visits
-      SET count = count + 1
-      WHERE id = 1
-      RETURNING count
-    `);
+    // GET /names
+    if (req.method === "GET" && req.url === "/names") {
+      const result = await pool.query(`
+        SELECT id, name
+        FROM names
+        ORDER BY id
+      `);
 
-    const visits = result.rows[0].count;
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+      });
 
-    res.writeHead(200, {
+      return res.end(JSON.stringify(result.rows));
+    }
+
+    // POST /names
+    if (req.method === "POST" && req.url === "/names") {
+      let body = "";
+
+      req.on("data", (chunk) => {
+        body += chunk.toString();
+      });
+
+      req.on("end", async () => {
+        try {
+          const data = JSON.parse(body);
+
+          if (!data.name) {
+            res.writeHead(400, {
+              "Content-Type": "application/json",
+            });
+
+            return res.end(
+              JSON.stringify({
+                error: "name is required",
+              }),
+            );
+          }
+
+          const result = await pool.query(
+            `
+            INSERT INTO names (name)
+            VALUES ($1)
+            RETURNING id, name
+            `,
+            [data.name],
+          );
+
+          res.writeHead(201, {
+            "Content-Type": "application/json",
+          });
+
+          res.end(JSON.stringify(result.rows[0]));
+        } catch (err) {
+          console.error(err);
+
+          res.writeHead(400, {
+            "Content-Type": "application/json",
+          });
+
+          res.end(
+            JSON.stringify({
+              error: "Invalid JSON",
+            }),
+          );
+        }
+      });
+
+      return;
+    }
+
+    res.writeHead(404, {
       "Content-Type": "application/json",
     });
 
     res.end(
       JSON.stringify({
-        message: "Hello from Node.js API!",
-        visits,
-        time: new Date().toISOString(),
+        error: "Not found",
       }),
     );
   } catch (error) {
@@ -55,7 +109,7 @@ const server = http.createServer(async (req, res) => {
 
     res.end(
       JSON.stringify({
-        error: "Database error",
+        error: "Internal server error",
       }),
     );
   }
